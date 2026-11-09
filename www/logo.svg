@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07517f"/><stop offset="1" stop-color="#087eb8"/></linearGradient></defs>
+<rect width="256" height="256" rx="42" fill="url(#g)"/>
+<path d="M38 174c18-24 34-36 54-38 12-2 20 5 27 11 9-20 21-38 38-52 11-9 22-10 29-2 7 8 4 19-5 28l-20 19c19-7 37-5 48 7 10 11 8 24-4 31-13 8-30 5-44 0-21-8-37-7-52 3-18 12-45 12-71-7z" fill="#fff"/>
+<path d="M121 106c-6-22 1-43 17-56 7-6 16-4 18 5 2 8-5 17-12 23-8 8-12 17-12 31z" fill="#b9f2fa"/>
+<circle cx="174" cy="82" r="4" fill="#07517f"/>
+<path d="M53 196h150" stroke="#b9f2fa" stroke-width="7" stroke-linecap="round"/>
+<text x="128" y="231" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#fff">RAHHAL</text>
+</svg>
