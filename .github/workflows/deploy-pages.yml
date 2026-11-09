@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "www/**"
+      - "package.json"
+      - "package-lock.json"
+      - "capacitor.config.json"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
@@ -27,6 +30,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Capacitor dependencies
+        run: npm install
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Android app
+        run: npx cap sync android
+
+      - name: Build Android APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Add APK to website downloads
+        run: |
+          mkdir -p www/downloads
+          cp android/app/build/outputs/apk/debug/app-debug.apk www/downloads/rahhal-android.apk
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
@@ -35,6 +67,6 @@ jobs:
         with:
           path: "./www"
 
-      - name: Deploy to GitHub Pages
+      - name: Deploy website and Android APK
         id: deployment
         uses: actions/deploy-pages@v4
