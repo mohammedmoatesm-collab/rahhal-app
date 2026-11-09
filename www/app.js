@@ -1,0 +1,118 @@
+/* RAHHAL live app. Public publishable key is intended for browser use; database RLS is the security boundary. */
+const SUPABASE_URL = 'https://szoptadwcnxbujzbiynm.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_clPkAlAvZDN2eq92UhzZaA_y9c0HCvy';
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+const $ = id => document.getElementById(id);
+let currentUser = null, staffProfile = null, lines = [], selectedDays = [];
+const safe = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const weekdays = ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+function msg(text, error=false){ const el=$('appMessage'); if(el){el.textContent=text;el.style.color=error?'#b42318':'#167344';} }
+function cairoDate(){ return new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Cairo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); }
+function setDateMin(){ $('tripDate').min = cairoDate(); }
+function showStudent(){ $('adminView').classList.add('hidden'); $('studentView').classList.remove('hidden'); }
+function showAdmin(){ $('studentView').classList.add('hidden'); $('adminView').classList.remove('hidden'); }
+async function loadPublicLines(){
+  const {data,error}=await db.from('lines').select('id,name,university,supervisor_name,supervisor_phone').eq('active',true).order('created_at');
+  if(error) throw error;
+  lines=data||[];
+  $('line').innerHTML='<option value="">اختار الخط</option>'+lines.map(l=>`<option value="${l.id}">${safe(l.name)} — ${safe(l.university)}</option>`).join('');
+}
+async function updateTripOptions(){
+  const lineId=$('line').value, date=$('tripDate').value;
+  $('pickup').innerHTML='<option value="">اختار نقطة التجمع</option>';
+  $('goTime').innerHTML='<option value="">اختار الميعاد</option>';
+  $('backTime').innerHTML='<option value="">اختار ميعاد العودة</option>';
+  if(!lineId) return;
+  const [{data:points,error:pe},{data:schedules,error:se}]=await Promise.all([
+    db.from('pickup_points').select('id,name,arrival_time,sort_order').eq('line_id',lineId).eq('visible_to_students',true).order('sort_order'),
+    date ? db.from('line_days').select('id,weekday,go_time,return_time').eq('line_id',lineId).eq('weekday',new Date(date+'T12:00:00').getDay()).eq('active',true) : Promise.resolve({data:[],error:null})
+  ]);
+  if(pe||se){msg((pe||se).message,true);return;}
+  $('pickup').innerHTML+='<option value="">'+(points?.length?'':'لا توجد نقاط تجمع مضافة')+'</option>'+ (points||[]).map(p=>`<option value="${p.id}">${safe(p.name)}${p.arrival_time?' — '+safe(p.arrival_time.slice(0,5)):''}</option>`).join('');
+  $('goTime').innerHTML+='<option value="">'+(schedules?.length?'':'لا يوجد موعد تشغيل في اليوم المختار')+'</option>'+(schedules||[]).map(s=>`<option value="${s.go_time}">${s.go_time.slice(0,5)}</option>`).join('');
+  const returns=[...new Set((schedules||[]).map(s=>s.return_time).filter(Boolean))];
+  $('backTime').innerHTML+='<option value="">اختار ميعاد العودة</option>'+returns.map(t=>`<option value="${t}">${t.slice(0,5)}</option>`).join('');
+  const line=lines.find(l=>l.id===lineId);
+  $('routePreview').textContent=`${line?.name||''} · ${date?weekdays[new Date(date+'T12:00:00').getDay()]: 'اختار تاريخ الرحلة'} · اختار نقطة التجمع والميعاد.`;
+}
+async function book(){
+  const name=$('studentName').value.trim(), phone=$('phone').value.trim(), university=$('university').value;
+  const lineId=$('line').value, pointId=$('pickup').value, date=$('tripDate').value, go=$('goTime').value, back=$('backTime').value||null;
+  if(!name||!phone||!university||!lineId||!pointId||!date||!go){alert('من فضلك أكمل بيانات الحجز.');return;}
+  if(!/^01[0125][0-9]{8}$/.test(phone)){alert('اكتب رقم موبايل مصري صحيح مكوّن من 11 رقم.');return;}
+  $('bookBtn').disabled=true; $('bookBtn').textContent='جاري تسجيل الحجز...'; msg('');
+  try{
+    const token=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(x=>x.toString(16).padStart(2,'0')).join('');
+    const {data,error}=await db.rpc('create_booking',{p_student_name:name,p_student_phone:phone,p_university:university,p_line_id:lineId,p_pickup_point_id:pointId,p_trip_date:date,p_go_time:go,p_return_time:back,p_cancel_token:token});
+    if(error) throw error;
+    const result=typeof data==='string'?JSON.parse(data):data;
+    localStorage.setItem('rahhal_cancel_'+result.booking_code,token);
+    const line=lines.find(l=>l.id===lineId);
+    $('confirmation').classList.remove('hidden');
+    $('confirmation').innerHTML=`<h3>✓ تم تسجيل حجزك</h3><p><b>رقم الحجز:</b> ${safe(result.booking_code)}</p><p><b>الاسم:</b> ${safe(name)}</p><p><b>الخط:</b> ${safe(line?.name)} · <b>نقطة التجمع:</b> ${safe($('pickup').selectedOptions[0].textContent)}</p><p><b>التاريخ:</b> ${safe(date)} · <b>الذهاب:</b> ${safe(go.slice(0,5))} · <b>العودة:</b> ${safe(back?back.slice(0,5):'غير محدد')}</p><p><b>المشرف:</b> ${safe(line?.supervisor_name||'سيتم إعلانه')} ${line?.supervisor_phone?`· <a href="tel:${safe(line.supervisor_phone)}">${safe(line.supervisor_phone)}</a> · <a href="https://wa.me/2${safe(line.supervisor_phone.replace(/^0/,''))}" target="_blank">واتساب</a>`:''}</p><p class="muted">احتفظ برقم الحجز لإلغاء الحجز عند الحاجة.</p><div class="grid" style="margin-top:12px"><input id="cancelCode" value="${safe(result.booking_code)}" readonly><button class="ghost" id="cancelMyBooking">إلغاء حجزي</button></div>`;
+    $('cancelMyBooking').onclick=()=>cancelOwn(result.booking_code,token);
+    $('studentName').value='';$('phone').value='';
+    msg('تم الحجز بنجاح.');
+  }catch(e){msg(e.message||'تعذر تسجيل الحجز. تأكد من إعدادات قاعدة البيانات.',true);alert(e.message||'تعذر تسجيل الحجز.');}
+  finally{$('bookBtn').disabled=false;$('bookBtn').innerHTML='تأكيد الحجز <span>←</span>';}
+}
+async function cancelOwn(code,token){
+  if(!confirm('هل تريد إلغاء هذا الحجز؟'))return;
+  const {data,error}=await db.rpc('cancel_booking',{p_booking_code:code,p_cancel_token:token});
+  if(error){msg(error.message,true);return;}
+  $('confirmation').innerHTML='<h3>تم إلغاء الحجز</h3><p>رقم الحجز: '+safe(code)+'</p>';
+  localStorage.removeItem('rahhal_cancel_'+code);
+}
+function loginPanel(){
+  $('adminAuth').innerHTML=`<section class="panel"><h2>دخول الإدارة</h2><p class="muted">الدخول للمديرين المعتمدين فقط.</p><label>البريد الإلكتروني<input id="adminEmail" type="email" autocomplete="username" placeholder="name@example.com"></label><label style="margin-top:12px">كلمة المرور<input id="adminPassword" type="password" autocomplete="current-password" placeholder="كلمة المرور"></label><button class="primary full" id="loginBtn">دخول لوحة الإدارة</button><p id="loginMessage" class="muted"></p></section>`;
+  $('loginBtn').onclick=async()=>{ $('loginBtn').disabled=true; const {data,error}=await db.auth.signInWithPassword({email:$('adminEmail').value.trim(),password:$('adminPassword').value}); $('loginBtn').disabled=false; if(error){$('loginMessage').textContent='بيانات الدخول غير صحيحة أو الحساب غير مفعّل.';return;} await verifyStaff(data.user); };
+}
+async function verifyStaff(user){
+  const {data,error}=await db.from('staff_profiles').select('user_id,full_name,role').eq('user_id',user.id).maybeSingle();
+  if(error||!data){await db.auth.signOut();$('loginMessage')&&($('loginMessage').textContent='هذا الحساب غير مضاف كمدير في رحّال.');return;}
+  currentUser=user;staffProfile=data;await renderDashboard();
+}
+async function renderDashboard(){
+  $('adminAuth').classList.add('hidden');$('adminDashboard').classList.remove('hidden');
+  $('adminWelcome').textContent=`أهلاً ${staffProfile.full_name} — ${staffProfile.role==='super_admin'?'مدير رئيسي':'مدير'}`;
+  $('lineManagement').classList.toggle('hidden',staffProfile.role!=='super_admin');
+  const [{data:bookings,error:be},{data:allLines,error:le}]=await Promise.all([
+    db.from('bookings').select('id,booking_code,student_name,student_phone,university,trip_date,go_time,return_time,status,lines(name),pickup_points(name)').order('trip_date',{ascending:false}).order('created_at',{ascending:false}),
+    db.from('lines').select('id,name,university,active').order('created_at')
+  ]);
+  if(be||le){msg((be||le).message,true);return;}
+  const today=cairoDate(), active=(bookings||[]).filter(b=>b.status==='booked');
+  $('bookingCount').textContent=active.length;$('todayCount').textContent=active.filter(b=>b.trip_date===today).length;$('lineCount').textContent=(allLines||[]).filter(l=>l.active).length;
+  const grouped={}; active.forEach(b=>{const key=b.trip_date+'__'+(b.lines?.name||'خط غير معروف');grouped[key]=(grouped[key]||0)+1;});
+  const summaries=Object.entries(grouped).sort((a,b)=>a[0].localeCompare(b[0]));
+  $('dailyLineSummary').innerHTML=summaries.length?summaries.map(([key,count])=>{const [date,lineName]=key.split('__');return `<div class="booking-item"><b>${safe(date)}</b> · ${safe(lineName)} <strong style="float:left;color:var(--blue)">${count} طالب</strong></div>`;}).join(''):'لا توجد حجوزات مؤكدة حتى الآن.';
+  $('bookingList').innerHTML=bookings?.length?bookings.map(b=>`<article class="booking-item"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><b>${safe(b.student_name)}</b><span class="muted">${safe(b.booking_code)} · ${b.status==='booked'?'حجز مؤكد':'ملغي'}</span></div><p>${safe(b.student_phone)} · <a href="tel:${safe(b.student_phone)}">اتصال</a> · <a target="_blank" href="https://wa.me/2${safe(b.student_phone.replace(/^0/,''))}">واتساب</a></p><p>${safe(b.university)} · ${safe(b.lines?.name)} · ${safe(b.pickup_points?.name)}</p><p>${safe(b.trip_date)} · ذهاب ${safe((b.go_time||'').slice(0,5))} · عودة ${safe((b.return_time||'').slice(0,5))}</p></article>`).join(''):'لا توجد حجوزات حتى الآن.';
+  $('adminLines').innerHTML=(allLines||[]).map(l=>`<div class="line-card"><b>${safe(l.name)}</b> · ${safe(l.university)} <span class="muted">${l.active?'مفعّل':'متوقف'}</span></div>`).join('')||'لم تتم إضافة خطوط بعد.';
+}
+async function createLine(){
+  const name=$('newLineName').value.trim(), university=$('newLineUniversity').value, supName=$('newSupervisorName').value.trim(), supPhone=$('newSupervisorPhone').value.trim();
+  const days=[...document.querySelectorAll('.weekday-check:checked')].map(x=>Number(x.value));
+  const go=$('newGoTime').value, back=$('newBackTime').value||null, stops=$('newStops').value.split('\n').map(x=>x.trim()).filter(Boolean);
+  if(!name||!university||!days.length||!go||!stops.length){msg('اكتب اسم الخط والجامعة والأيام والموعد ونقاط التجمع.',true);return;}
+  const {data:line,error}=await db.from('lines').insert({name,university,supervisor_name:supName||null,supervisor_phone:supPhone||null}).select().single();
+  if(error){msg(error.message,true);return;}
+  const {error:de}=await db.from('line_days').insert(days.map(weekday=>({line_id:line.id,weekday,go_time:go,return_time:back})));
+  const {error:pe}=await db.from('pickup_points').insert(stops.map((stop,i)=>({line_id:line.id,name:stop,sort_order:i,visible_to_students:true})));
+  if(de||pe){msg((de||pe).message,true);return;}
+  $('newLineName').value='';$('newSupervisorName').value='';$('newSupervisorPhone').value='';$('newStops').value='';
+  msg('تمت إضافة الخط ومواعيده ونقاط التجمع.'); await loadPublicLines(); await renderDashboard();
+}
+async function init(){
+  setDateMin();
+  $('adminToggle').onclick=async()=>{showAdmin();if(currentUser){await renderDashboard();}else{loginPanel();$('adminAuth').classList.remove('hidden');$('adminDashboard').classList.add('hidden');}};
+  $('studentToggle').onclick=showStudent;
+  $('line').addEventListener('change',updateTripOptions);$('tripDate').addEventListener('change',updateTripOptions);
+  $('bookBtn').onclick=book;
+  $('logoutBtn').onclick=async()=>{await db.auth.signOut();currentUser=null;staffProfile=null;loginPanel();$('adminAuth').classList.remove('hidden');$('adminDashboard').classList.add('hidden');};
+  $('createLineBtn').onclick=createLine;
+  await loadPublicLines();
+  const {data:{session}}=await db.auth.getSession(); if(session?.user){await verifyStaff(session.user);}
+  db.auth.onAuthStateChange(async(_event,session)=>{if(!session){currentUser=null;staffProfile=null;}});
+}
+$('appMessage').textContent='';
+init().catch(e=>{msg('تعذر الاتصال بقاعدة البيانات: '+e.message,true);console.error(e);});
