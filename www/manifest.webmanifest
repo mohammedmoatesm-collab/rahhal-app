@@ -1,0 +1,15 @@
+{
+  "name": "رحّال RAHHAL",
+  "short_name": "رحّال",
+  "description": "حجز رحلات الجامعات بسهولة",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2f8fb",
+  "theme_color": "#087eb8",
+  "icons": [
+    {"src":"logo.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}
+  ]
+}
