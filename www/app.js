@@ -11,11 +11,19 @@ function cairoDate(){ return new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/C
 function setDateMin(){ $('tripDate').min = cairoDate(); }
 function showStudent(){ $('adminView').classList.add('hidden'); $('studentView').classList.remove('hidden'); }
 function showAdmin(){ $('studentView').classList.add('hidden'); $('adminView').classList.remove('hidden'); }
+function renderStudentLineOptions(){
+  const university=$('university').value;
+  const current=$('line').value;
+  const available=university?lines.filter(l=>l.university===university):[];
+  $('line').innerHTML='<option value="">'+(university?(available.length?'اختار الخط':'لا توجد خطوط مفعّلة لهذه الجامعة'):'اختار الجامعة أولاً')+'</option>'+available.map(l=>`<option value="${l.id}">${safe(l.name)}</option>`).join('');
+  if(current&&available.some(l=>l.id===current)) $('line').value=current;
+  else $('line').value='';
+}
 async function loadPublicLines(){
   const {data,error}=await db.from('lines').select('id,name,university,supervisor_name,supervisor_phone').eq('active',true).order('created_at');
   if(error) throw error;
   lines=data||[];
-  $('line').innerHTML='<option value="">اختار الخط</option>'+lines.map(l=>`<option value="${l.id}">${safe(l.name)} — ${safe(l.university)}</option>`).join('');
+  renderStudentLineOptions();
 }
 async function updateTripOptions(){
   const lineId=$('line').value, date=$('tripDate').value;
@@ -30,7 +38,7 @@ async function updateTripOptions(){
   ]);
   if(pe||se){msg((pe||se).message,true);return;}
   $('pickup').innerHTML+='<option value="">'+(points?.length?'':'لا توجد نقاط تجمع مضافة')+'</option>'+ (points||[]).map(p=>`<option value="${p.id}">${safe(p.name)}${p.arrival_time?' — '+safe(p.arrival_time.slice(0,5)):''}</option>`).join('');
-  $('goTime').innerHTML+='<option value="">'+(schedules?.length?'':'لا يوجد موعد تشغيل في اليوم المختار')+'</option>'+(schedules||[]).map(s=>`<option value="${s.go_time}">${s.go_time.slice(0,5)}</option>`).join('');
+  $('goTime').innerHTML+='<option value="">'+(date?(schedules?.length?'اختار الميعاد':'لا يوجد موعد تشغيل في اليوم المختار'):'اختار تاريخ الرحلة أولاً')+'</option>'+(schedules||[]).map(s=>`<option value="${s.go_time}">${s.go_time.slice(0,5)}</option>`).join('');
   const returns=[...new Set((schedules||[]).map(s=>s.return_time).filter(Boolean))];
   $('backTime').innerHTML+='<option value="">اختار ميعاد العودة</option>'+returns.map(t=>`<option value="${t}">${t.slice(0,5)}</option>`).join('');
   const line=lines.find(l=>l.id===lineId);
@@ -158,6 +166,7 @@ async function init(){
   setDateMin();
   $('adminToggle').onclick=async()=>{showAdmin();if(currentUser){await renderDashboard();}else{loginPanel();$('adminAuth').classList.remove('hidden');$('adminDashboard').classList.add('hidden');}};
   $('studentToggle').onclick=showStudent;
+  $('university').addEventListener('change',()=>{renderStudentLineOptions();updateTripOptions();});
   $('line').addEventListener('change',updateTripOptions);$('tripDate').addEventListener('change',updateTripOptions);
   $('bookBtn').onclick=book;
   $('logoutBtn').onclick=async()=>{await db.auth.signOut();currentUser=null;staffProfile=null;loginPanel();$('adminAuth').classList.remove('hidden');$('adminDashboard').classList.add('hidden');};
