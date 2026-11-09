@@ -19,6 +19,7 @@ async function loadPublicLines(){
 }
 async function updateTripOptions(){
   const lineId=$('line').value, date=$('tripDate').value;
+  $('studentBusPhoto').classList.add('hidden');
   $('pickup').innerHTML='<option value="">اختار نقطة التجمع</option>';
   $('goTime').innerHTML='<option value="">اختار الميعاد</option>';
   $('backTime').innerHTML='<option value="">اختار ميعاد العودة</option>';
@@ -34,6 +35,7 @@ async function updateTripOptions(){
   $('backTime').innerHTML+='<option value="">اختار ميعاد العودة</option>'+returns.map(t=>`<option value="${t}">${t.slice(0,5)}</option>`).join('');
   const line=lines.find(l=>l.id===lineId);
   $('routePreview').textContent=`${line?.name||''} · ${date?weekdays[new Date(date+'T12:00:00').getDay()]: 'اختار تاريخ الرحلة'} · اختار نقطة التجمع والميعاد.`;
+  await loadStudentBusPhoto(lineId,date);
 }
 async function book(){
   const name=$('studentName').value.trim(), phone=$('phone').value.trim(), university=$('university').value;
@@ -88,7 +90,52 @@ async function renderDashboard(){
   $('dailyLineSummary').innerHTML=summaries.length?summaries.map(([key,count])=>{const [date,lineName]=key.split('__');return `<div class="booking-item"><b>${safe(date)}</b> · ${safe(lineName)} <strong style="float:left;color:var(--blue)">${count} طالب</strong></div>`;}).join(''):'لا توجد حجوزات مؤكدة حتى الآن.';
   $('bookingList').innerHTML=bookings?.length?bookings.map(b=>`<article class="booking-item"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><b>${safe(b.student_name)}</b><span class="muted">${safe(b.booking_code)} · ${b.status==='booked'?'حجز مؤكد':'ملغي'}</span></div><p>${safe(b.student_phone)} · <a href="tel:${safe(b.student_phone)}">اتصال</a> · <a target="_blank" href="https://wa.me/2${safe(b.student_phone.replace(/^0/,''))}">واتساب</a></p><p>${safe(b.university)} · ${safe(b.lines?.name)} · ${safe(b.pickup_points?.name)}</p><p>${safe(b.trip_date)} · ذهاب ${safe((b.go_time||'').slice(0,5))} · عودة ${safe((b.return_time||'').slice(0,5))}</p></article>`).join(''):'لا توجد حجوزات حتى الآن.';
   $('adminLines').innerHTML=(allLines||[]).map(l=>`<div class="line-card"><b>${safe(l.name)}</b> · ${safe(l.university)} <span class="muted">${l.active?'مفعّل':'متوقف'}</span></div>`).join('')||'لم تتم إضافة خطوط بعد.';
+  const selectedPhotoLine=$('busPhotoLine').value;
+  $('busPhotoLine').innerHTML='<option value="">اختار الخط</option>'+(allLines||[]).map(l=>`<option value="${l.id}">${safe(l.name)} — ${safe(l.university)}</option>`).join('');
+  if(selectedPhotoLine&&allLines.some(l=>l.id===selectedPhotoLine)) $('busPhotoLine').value=selectedPhotoLine;
+  if(!$('busPhotoDate').value) $('busPhotoDate').value=today;
+  await loadAdminBusPhotoPreview();
 }
+
+async function loadStudentBusPhoto(lineId,date){
+  const wrap=$('studentBusPhoto');
+  wrap.classList.add('hidden');
+  if(!lineId||!date) return;
+  const {data,error}=await db.from('daily_bus_photos').select('image_url').eq('line_id',lineId).eq('trip_date',date).maybeSingle();
+  if(error){console.warn('Daily bus photo unavailable:',error.message);return;}
+  if(data?.image_url){$('studentBusImage').src=data.image_url;$('studentBusPhoto').classList.remove('hidden');}
+}
+async function loadAdminBusPhotoPreview(){
+  const lineId=$('busPhotoLine')?.value, date=$('busPhotoDate')?.value;
+  const preview=$('adminBusImage'), wrap=$('adminBusPreview');
+  if(!lineId||!date){wrap.classList.add('hidden');return;}
+  const {data,error}=await db.from('daily_bus_photos').select('image_url').eq('line_id',lineId).eq('trip_date',date).maybeSingle();
+  if(error){msg('تعذر تحميل صورة الباص: '+error.message,true);wrap.classList.add('hidden');return;}
+  if(data?.image_url){preview.src=data.image_url;wrap.classList.remove('hidden');}
+  else wrap.classList.add('hidden');
+}
+async function saveDailyBusPhoto(){
+  const lineId=$('busPhotoLine').value, date=$('busPhotoDate').value, file=$('busPhotoFile').files[0];
+  if(!lineId||!date||!file){msg('اختار الخط والتاريخ وصورة الباص أولاً.',true);return;}
+  if(!file.type.startsWith('image/')){msg('الملف المختار لازم يكون صورة.',true);return;}
+  if(file.size>5*1024*1024){msg('حجم الصورة لازم يكون 5 ميجابايت أو أقل.',true);return;}
+  const button=$('saveBusPhotoBtn');button.disabled=true;button.textContent='جاري رفع الصورة...';
+  try{
+    const ext=(file.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'')||'jpg';
+    const storagePath=`${lineId}/${date}/${crypto.randomUUID()}.${ext}`;
+    const {error:uploadError}=await db.storage.from('bus-photos').upload(storagePath,file,{contentType:file.type,upsert:false,cacheControl:'3600'});
+    if(uploadError) throw uploadError;
+    const {data:publicData}=db.storage.from('bus-photos').getPublicUrl(storagePath);
+    const {error:saveError}=await db.from('daily_bus_photos').upsert({
+      line_id:lineId,trip_date:date,image_url:publicData.publicUrl,storage_path:storagePath,updated_by:currentUser.id,updated_at:new Date().toISOString()
+    },{onConflict:'line_id,trip_date'});
+    if(saveError) throw saveError;
+    $('adminBusImage').src=publicData.publicUrl;$('adminBusPreview').classList.remove('hidden');$('busPhotoFile').value='';
+    msg('تم تحديث صورة الباص لهذا الخط في التاريخ المحدد.'); 
+  }catch(e){msg('تعذر حفظ الصورة: '+(e.message||'تأكد من تنفيذ إعدادات قاعدة البيانات والتخزين.'),true);}
+  finally{button.disabled=false;button.textContent='حفظ صورة الباص لهذا اليوم';}
+}
+
 async function createLine(){
   const name=$('newLineName').value.trim(), university=$('newLineUniversity').value, supName=$('newSupervisorName').value.trim(), supPhone=$('newSupervisorPhone').value.trim();
   const days=[...document.querySelectorAll('.weekday-check:checked')].map(x=>Number(x.value));
@@ -110,6 +157,9 @@ async function init(){
   $('bookBtn').onclick=book;
   $('logoutBtn').onclick=async()=>{await db.auth.signOut();currentUser=null;staffProfile=null;loginPanel();$('adminAuth').classList.remove('hidden');$('adminDashboard').classList.add('hidden');};
   $('createLineBtn').onclick=createLine;
+  $('busPhotoLine').addEventListener('change',loadAdminBusPhotoPreview);
+  $('busPhotoDate').addEventListener('change',loadAdminBusPhotoPreview);
+  $('saveBusPhotoBtn').onclick=saveDailyBusPhoto;
   await loadPublicLines();
   const {data:{session}}=await db.auth.getSession(); if(session?.user){await verifyStaff(session.user);}
   db.auth.onAuthStateChange(async(_event,session)=>{if(!session){currentUser=null;staffProfile=null;}});
