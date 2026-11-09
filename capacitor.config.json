@@ -1,0 +1,6 @@
+{
+  "appId": "com.rahhal.transport",
+  "appName": "Rahhal",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}
