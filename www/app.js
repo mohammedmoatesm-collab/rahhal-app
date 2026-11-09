@@ -77,7 +77,7 @@ async function verifyStaff(user){
 async function renderDashboard(){
   $('adminAuth').classList.add('hidden');$('adminDashboard').classList.remove('hidden');
   $('adminWelcome').textContent=`أهلاً ${staffProfile.full_name} — ${staffProfile.role==='super_admin'?'مدير رئيسي':'مدير'}`;
-  $('lineManagement').classList.toggle('hidden',staffProfile.role!=='super_admin');
+  $('lineManagement').classList.remove('hidden');
   const [{data:bookings,error:be},{data:allLines,error:le}]=await Promise.all([
     db.from('bookings').select('id,booking_code,student_name,student_phone,university,trip_date,go_time,return_time,status,lines(name),pickup_points(name)').order('trip_date',{ascending:false}).order('created_at',{ascending:false}),
     db.from('lines').select('id,name,university,active').order('created_at')
@@ -138,16 +138,21 @@ async function saveDailyBusPhoto(){
 
 async function createLine(){
   const name=$('newLineName').value.trim(), university=$('newLineUniversity').value, supName=$('newSupervisorName').value.trim(), supPhone=$('newSupervisorPhone').value.trim();
-  const days=[...document.querySelectorAll('.weekday-check:checked')].map(x=>Number(x.value));
-  const go=$('newGoTime').value, back=$('newBackTime').value||null, stops=$('newStops').value.split('\n').map(x=>x.trim()).filter(Boolean);
-  if(!name||!university||!days.length||!go||!stops.length){msg('اكتب اسم الخط والجامعة والأيام والموعد ونقاط التجمع.',true);return;}
-  const {data:line,error}=await db.from('lines').insert({name,university,supervisor_name:supName||null,supervisor_phone:supPhone||null}).select().single();
-  if(error){msg(error.message,true);return;}
-  const {error:de}=await db.from('line_days').insert(days.map(weekday=>({line_id:line.id,weekday,go_time:go,return_time:back})));
-  const {error:pe}=await db.from('pickup_points').insert(stops.map((stop,i)=>({line_id:line.id,name:stop,sort_order:i,visible_to_students:true})));
-  if(de||pe){msg((de||pe).message,true);return;}
-  $('newLineName').value='';$('newSupervisorName').value='';$('newSupervisorPhone').value='';$('newStops').value='';
-  msg('تمت إضافة الخط ومواعيده ونقاط التجمع.'); await loadPublicLines(); await renderDashboard();
+  const dayMap={'الأحد':0,'الاحد':0,'الاثنين':1,'الثلاثاء':2,'الأربعاء':3,'الاربعاء':3,'الخميس':4,'الجمعة':5,'السبت':6};
+  const daysText=$('newSchedules').value.split('\\n').map(x=>x.trim()).filter(Boolean);
+  const days=daysText.map(row=>{const [day,go,back='']=row.split('|').map(x=>x.trim());return {weekday:dayMap[day],go_time:go,return_time:back||null,day};});
+  const stops=$('newStops').value.split('\\n').map(x=>x.trim()).filter(Boolean).map((row,i)=>{const [stop,arrival='']=row.split('|').map(x=>x.trim());return {name:stop,arrival_time:arrival||null,sort_order:i};});
+  if(!name||!university||!days.length||!stops.length){msg('اكتب اسم الخط والجامعة، ومواعيد يوم واحد على الأقل، ونقاط التجمع.',true);return;}
+  if(days.some(d=>d.weekday===undefined||!/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(d.go_time)|| (d.return_time&&!/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(d.return_time)))){msg('راجع المواعيد: اكتب كل يوم بالشكل: الاثنين|07:00|15:00',true);return;}
+  if(stops.some(p=>!p.name|| (p.arrival_time&&!/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(p.arrival_time)))){msg('راجع نقاط التجمع. اكتب النقطة ثم | ثم ميعاد المرور مثل: ميدان المحطة|06:30',true);return;}
+  const button=$('createLineBtn');button.disabled=true;button.textContent='جاري حفظ الخط...';
+  try{
+    const {data,error}=await db.rpc('create_line_setup',{p_name:name,p_university:university,p_supervisor_name:supName,p_supervisor_phone:supPhone,p_days:days.map(({weekday,go_time,return_time})=>({weekday,go_time,return_time})),p_stops:stops});
+    if(error) throw error;
+    $('newLineName').value='';$('newSupervisorName').value='';$('newSupervisorPhone').value='';$('newSchedules').value='';$('newStops').value='';
+    msg('تمت إضافة الخط وكل مواعيده ونقاط التجمع بنجاح.');await loadPublicLines();await renderDashboard();
+  }catch(e){msg('تعذر حفظ الخط: '+(e.message||'تحقق من تنفيذ ملف إعداد الإدارة في Supabase.'),true);}
+  finally{button.disabled=false;button.textContent='حفظ الخط والمواعيد ونقاط التجمع';}
 }
 async function init(){
   setDateMin();
