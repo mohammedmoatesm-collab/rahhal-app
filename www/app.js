@@ -25,22 +25,30 @@ async function loadPublicLines(){
   lines=data||[];
   renderStudentLineOptions();
 }
+let selectedDaySchedules=[];
+function updateReturnOptions(){
+  const go=$('goTime').value;
+  const matches=selectedDaySchedules.filter(item=>item.go_time===go&&item.return_time);
+  const returns=[...new Set(matches.map(item=>item.return_time))];
+  $('backTime').innerHTML='<option value="">'+(matches.length?'اختار ميعاد العودة':'لا توجد عودة محددة لهذا الموعد')+'</option>'+returns.map(t=>`<option value="${t}">${t.slice(0,5)}</option>`).join('');
+}
 async function updateTripOptions(){
   const lineId=$('line').value, date=$('tripDate').value;
   $('studentBusPhoto').classList.add('hidden');
   $('pickup').innerHTML='<option value="">اختار نقطة التجمع</option>';
   $('goTime').innerHTML='<option value="">اختار الميعاد</option>';
   $('backTime').innerHTML='<option value="">اختار ميعاد العودة</option>';
+  selectedDaySchedules=[];
   if(!lineId) return;
   const [{data:points,error:pe},{data:schedules,error:se}]=await Promise.all([
     db.from('pickup_points').select('id,name,arrival_time,sort_order').eq('line_id',lineId).eq('visible_to_students',true).order('sort_order'),
-    date ? db.from('line_days').select('id,weekday,go_time,return_time').eq('line_id',lineId).eq('weekday',new Date(date+'T12:00:00').getDay()).eq('active',true) : Promise.resolve({data:[],error:null})
+    date ? db.from('line_days').select('id,weekday,go_time,return_time').eq('line_id',lineId).eq('weekday',new Date(date+'T12:00:00').getDay()).eq('active',true).order('go_time') : Promise.resolve({data:[],error:null})
   ]);
   if(pe||se){msg((pe||se).message,true);return;}
+  selectedDaySchedules=schedules||[];
   $('pickup').innerHTML+='<option value="">'+(points?.length?'':'لا توجد نقاط تجمع مضافة')+'</option>'+ (points||[]).map(p=>`<option value="${p.id}">${safe(p.name)}${p.arrival_time?' — '+safe(p.arrival_time.slice(0,5)):''}</option>`).join('');
-  $('goTime').innerHTML+='<option value="">'+(date?(schedules?.length?'اختار الميعاد':'لا يوجد موعد تشغيل في اليوم المختار'):'اختار تاريخ الرحلة أولاً')+'</option>'+(schedules||[]).map(s=>`<option value="${s.go_time}">${s.go_time.slice(0,5)}</option>`).join('');
-  const returns=[...new Set((schedules||[]).map(s=>s.return_time).filter(Boolean))];
-  $('backTime').innerHTML+='<option value="">اختار ميعاد العودة</option>'+returns.map(t=>`<option value="${t}">${t.slice(0,5)}</option>`).join('');
+  $('goTime').innerHTML+='<option value="">'+(date?(schedules?.length?'اختار الميعاد':'لا يوجد موعد تشغيل في اليوم المختار'):'اختار تاريخ الرحلة أولاً')+'</option>'+(schedules||[]).map(item=>`<option value="${item.go_time}">${item.go_time.slice(0,5)}</option>`).join('');
+  updateReturnOptions();
   const line=lines.find(l=>l.id===lineId);
   $('routePreview').textContent=`${line?.name||''} · ${date?weekdays[new Date(date+'T12:00:00').getDay()]: 'اختار تاريخ الرحلة'} · اختار نقطة التجمع والميعاد.`;
   await loadStudentBusPhoto(lineId,date);
@@ -93,9 +101,9 @@ async function renderDashboard(){
   if(be||le){msg((be||le).message,true);return;}
   const today=cairoDate(), active=(bookings||[]).filter(b=>b.status==='booked');
   $('bookingCount').textContent=active.length;$('todayCount').textContent=active.filter(b=>b.trip_date===today).length;$('lineCount').textContent=(allLines||[]).filter(l=>l.active).length;
-  const grouped={}; active.forEach(b=>{const key=b.trip_date+'__'+(b.lines?.name||'خط غير معروف');grouped[key]=(grouped[key]||0)+1;});
+  const grouped={}; active.forEach(b=>{const key=[b.trip_date,b.lines?.name||'خط غير معروف',(b.go_time||'').slice(0,5)].join('__');grouped[key]=(grouped[key]||0)+1;});
   const summaries=Object.entries(grouped).sort((a,b)=>a[0].localeCompare(b[0]));
-  $('dailyLineSummary').innerHTML=summaries.length?summaries.map(([key,count])=>{const [date,lineName]=key.split('__');return `<div class="booking-item"><b>${safe(date)}</b> · ${safe(lineName)} <strong style="float:left;color:var(--blue)">${count} طالب</strong></div>`;}).join(''):'لا توجد حجوزات مؤكدة حتى الآن.';
+  $('dailyLineSummary').innerHTML=summaries.length?summaries.map(([key,count])=>{const [date,lineName,goTime]=key.split('__');return `<div class="booking-item"><b>${safe(date)}</b> · ${safe(lineName)} · ذهاب ${safe(goTime)} <strong style="float:left;color:var(--blue)">${count} طالب</strong></div>`;}).join(''):'لا توجد حجوزات مؤكدة حتى الآن.';
   $('bookingList').innerHTML=bookings?.length?bookings.map(b=>`<article class="booking-item"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><b>${safe(b.student_name)}</b><span class="muted">${safe(b.booking_code)} · ${b.status==='booked'?'حجز مؤكد':'ملغي'}</span></div><p>${safe(b.student_phone)} · <a href="tel:${safe(b.student_phone)}">اتصال</a> · <a target="_blank" href="https://wa.me/2${safe(b.student_phone.replace(/^0/,''))}">واتساب</a></p><p>${safe(b.university)} · ${safe(b.lines?.name)} · ${safe(b.pickup_points?.name)}</p><p>${safe(b.trip_date)} · ذهاب ${safe((b.go_time||'').slice(0,5))} · عودة ${safe((b.return_time||'').slice(0,5))}</p></article>`).join(''):'لا توجد حجوزات حتى الآن.';
   $('adminLines').innerHTML=(allLines||[]).map(l=>`<div class="line-card"><b>${safe(l.name)}</b> · ${safe(l.university)} <span class="muted">${l.active?'مفعّل':'متوقف'}</span></div>`).join('')||'لم تتم إضافة خطوط بعد.';
   const selectedPhotoLine=$('busPhotoLine').value;
@@ -167,7 +175,7 @@ async function init(){
   $('adminToggle').onclick=async()=>{showAdmin();if(currentUser){await renderDashboard();}else{loginPanel();$('adminAuth').classList.remove('hidden');$('adminDashboard').classList.add('hidden');}};
   $('studentToggle').onclick=showStudent;
   $('university').addEventListener('change',()=>{renderStudentLineOptions();updateTripOptions();});
-  $('line').addEventListener('change',updateTripOptions);$('tripDate').addEventListener('change',updateTripOptions);
+  $('line').addEventListener('change',updateTripOptions);$('tripDate').addEventListener('change',updateTripOptions);$('goTime').addEventListener('change',updateReturnOptions);
   $('bookBtn').onclick=book;
   $('logoutBtn').onclick=async()=>{await db.auth.signOut();currentUser=null;staffProfile=null;loginPanel();$('adminAuth').classList.remove('hidden');$('adminDashboard').classList.add('hidden');};
   $('createLineBtn').onclick=createLine;
