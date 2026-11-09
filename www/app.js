@@ -111,6 +111,36 @@ async function renderDashboard(){
   if(selectedPhotoLine&&allLines.some(l=>l.id===selectedPhotoLine)) $('busPhotoLine').value=selectedPhotoLine;
   if(!$('busPhotoDate').value) $('busPhotoDate').value=today;
   await loadAdminBusPhotoPreview();
+  await loadStaffManagement();
+}
+
+async function loadStaffManagement(){
+  const panel=$('staffManagement');
+  if(!panel) return;
+  const isSuper=staffProfile?.role==='super_admin';
+  panel.classList.toggle('hidden',!isSuper);
+  if(!isSuper) return;
+  const {data,error}=await db.rpc('list_staff_members');
+  if(error){$('staffList').textContent='تعذر تحميل المديرين: '+error.message;return;}
+  $('staffList').innerHTML=(data||[]).map(member=>`<div class="booking-item"><b>${safe(member.full_name)}</b> · ${safe(member.email||'بدون بريد')} <span class="muted">${member.role==='super_admin'?'مدير رئيسي':'مدير'}</span>${member.role==='manager'? `<button class="ghost" style="float:left" onclick="removeManager('${member.user_id}')">إزالة الصلاحية</button>`:''}</div>`).join('')||'لا يوجد مديرون مضافون.';
+}
+async function addManager(){
+  const name=$('newManagerName').value.trim(),email=$('newManagerEmail').value.trim();
+  if(!name||!email){msg('اكتب اسم المدير والبريد الإلكتروني.',true);return;}
+  const button=$('addManagerBtn');button.disabled=true;
+  try{
+    const {error}=await db.rpc('add_manager_by_email',{p_email:email,p_full_name:name});
+    if(error) throw error;
+    $('newManagerName').value='';$('newManagerEmail').value='';
+    msg('تمت إضافة المدير بنجاح.');await loadStaffManagement();
+  }catch(e){msg(e.message||'تعذرت إضافة المدير.',true);}
+  finally{button.disabled=false;}
+}
+async function removeManager(userId){
+  if(!confirm('هل تريد إزالة صلاحية هذا المدير؟ لن يتم حذف حسابه من Supabase.')) return;
+  const {error}=await db.rpc('remove_manager',{p_user_id:userId});
+  if(error){msg(error.message,true);return;}
+  msg('تمت إزالة صلاحية المدير.');await loadStaffManagement();
 }
 
 async function loadStudentBusPhoto(lineId,date){
@@ -179,6 +209,7 @@ async function init(){
   $('bookBtn').onclick=book;
   $('logoutBtn').onclick=async()=>{await db.auth.signOut();currentUser=null;staffProfile=null;loginPanel();$('adminAuth').classList.remove('hidden');$('adminDashboard').classList.add('hidden');};
   $('createLineBtn').onclick=createLine;
+  $('addManagerBtn').onclick=addManager;
   $('busPhotoLine').addEventListener('change',loadAdminBusPhotoPreview);
   $('busPhotoDate').addEventListener('change',loadAdminBusPhotoPreview);
   $('saveBusPhotoBtn').onclick=saveDailyBusPhoto;
