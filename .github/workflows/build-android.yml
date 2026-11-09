@@ -1,8 +1,6 @@
 name: Build Rahhal Android APK
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
   build:
